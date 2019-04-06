@@ -20,7 +20,7 @@ exports.findUsers = (req, res) => {
       .catch(err => {
         res.status(500).json({
           message: "Failed to get users",
-          data: {}
+          data: []
         });
       });
   } else {
@@ -47,7 +47,7 @@ exports.findUsers = (req, res) => {
         if (docs == null || docs.length == 0) {
           res.status(404).json({
             message: "Cannot find users under these conditions",
-            data: {}
+            data: []
           });
         } else {
           res.status(200).json({
@@ -59,7 +59,7 @@ exports.findUsers = (req, res) => {
       .catch(err => {
         res.status(500).json({
           message: "Failed to get users",
-          data: {}
+          data: []
         });
       });
   }
@@ -72,14 +72,14 @@ exports.createUser = (req, res) => {
   if (user.name == null || user.name == "") {
     res.status(400).json({
       message: "User cannot be created without a name",
-      data: {}
+      data: []
     });
     return;
   }
   if (user.email == null || user.email == "") {
     res.status(400).json({
       message: "User cannot be created without a email",
-      data: {}
+      data: []
     });
     return;
   }
@@ -98,12 +98,12 @@ exports.createUser = (req, res) => {
       if (err.code == 11000) {
         res.status(400).json({
           message: "Email address should be unique",
-          data: {}
+          data: []
         });
       } else {
         res.status(500).json({
           message: "Failed to create a user",
-          data: {}
+          data: []
         });
       }
     });
@@ -117,7 +117,7 @@ exports.findUserById = (req, res) => {
       if (doc == null) {
         res.status(404).json({
           message: `Cannot find the user with id ${userId}`,
-          data: {}
+          data: []
         });
       } else {
         res.status(200).json({
@@ -129,24 +129,25 @@ exports.findUserById = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: `Failed to get the user with id ${userId}`,
-        data: {}
+        data: []
       });
     });
 };
 
+// the tasks in the user's pendingTasks will be updated if the name of the user changed.
 exports.updateUserById = (req, res) => {
   const user = req.body;
   if (user.name == null || user.name == "") {
     res.status(400).json({
       message: "User cannot be updated without a name",
-      data: {}
+      data: []
     });
     return;
   }
   if (user.email == null || user.email == "") {
     res.status(400).json({
       message: "User cannot be updated without a email",
-      data: {}
+      data: []
     });
     return;
   }
@@ -155,7 +156,7 @@ exports.updateUserById = (req, res) => {
   User.findByIdAndUpdate(userId, { $set: user }, { new: true })
     .exec()
     .then(userDoc => {
-      Task.findOneAndUpdate(
+      Task.updateMany(
         { assignedUser: userId },
         { assignedUserName: user.name },
         { new: true }
@@ -170,18 +171,19 @@ exports.updateUserById = (req, res) => {
         .catch(err => {
           res.status(500).json({
             message: `Failed to update the user with id ${userId}`,
-            data: {}
+            data: []
           });
         });
     })
     .catch(err => {
       res.status(500).json({
         message: `Failed to update the user with id ${userId}`,
-        data: {}
+        data: []
       });
     });
 };
 
+// the tasks in the user's pendingTasks will be updated to unassigned.
 exports.deleteUserById = (req, res) => {
   const userId = req.params.id;
   User.findByIdAndDelete(userId)
@@ -190,10 +192,14 @@ exports.deleteUserById = (req, res) => {
       if (!userDoc) {
         res.status(404).json({
           message: `Cannot find the user with id ${userId}`,
-          data: {}
+          data: []
         });
       } else {
-        Task.findOneAndDelete({ assignedUser: userId })
+        Task.updateMany(
+          { assignedUser: userId },
+          { assignedUser: "", assignedUserName: "unassigned" },
+          { new: true }
+        )
           .exec()
           .then(taskDoc => {
             res.status(200).json({
@@ -204,7 +210,7 @@ exports.deleteUserById = (req, res) => {
           .catch(err => {
             res.status(500).json({
               message: `Failed to delete the tasks of the user with id ${userId}`,
-              data: {}
+              data: []
             });
           });
       }
@@ -212,7 +218,7 @@ exports.deleteUserById = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: `Failed to delete the user with id ${userId}`,
-        data: {}
+        data: []
       });
     });
 };
@@ -234,7 +240,7 @@ exports.findTasks = (req, res) => {
       .catch(err => {
         res.status(500).json({
           message: "Failed to get tasks",
-          data: {}
+          data: []
         });
       });
   } else {
@@ -261,7 +267,7 @@ exports.findTasks = (req, res) => {
         if (docs == null || docs.length == 0) {
           res.status(404).json({
             message: "Cannot find tasks under these conditions",
-            data: {}
+            data: []
           });
         } else {
           res.status(200).json({
@@ -273,29 +279,47 @@ exports.findTasks = (req, res) => {
       .catch(err => {
         res.status(500).json({
           message: "Failed to get tasks",
-          data: {}
+          data: []
         });
       });
   }
 };
 
-exports.createTask = (req, res) => {
+// Check the existence of the assigned user first, if the user exists, the user's pendingTasks will be updated,
+// otherwise the task will be inserted without an assigned user.
+exports.createTask = async (req, res) => {
   let task = req.body;
 
-  // check input
+  // check if the name and deadline is empty
   if (task.name == null || task.name == "") {
     res.status(400).json({
       message: "Task cannot be created without a name",
-      data: {}
+      data: []
     });
     return;
   }
   if (task.deadline == null || task.deadline == "") {
     res.status(400).json({
       message: "Task cannot be created without a deadline",
-      data: {}
+      data: []
     });
     return;
+  }
+
+  // check if the assigned user exist
+  if (task.assignedUser) {
+    await User.findById(task.assignedUser)
+      .exec()
+      .then(doc => {
+        if (!doc) {
+          task.assignedUser = "";
+          task.assignedUserName = "unassigned";
+        }
+      })
+      .catch(err => {
+        task.assignedUser = "";
+        task.assignedUserName = "unassigned";
+      });
   }
 
   // input is valid, insert the new task into the database
@@ -303,7 +327,7 @@ exports.createTask = (req, res) => {
   task
     .save()
     .then(taskDoc => {
-      if (task.assignedUser) {
+      if (task.assignedUser != "" && !task.completed) {
         User.findByIdAndUpdate(task.assignedUser, {
           $push: { pendingTasks: taskDoc._id }
         })
@@ -317,7 +341,7 @@ exports.createTask = (req, res) => {
           .catch(err => {
             res.status(500).json({
               message: "Failed to assign the new task to the user",
-              data: {}
+              data: []
             });
           });
       } else {
@@ -330,7 +354,7 @@ exports.createTask = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: "Failed to create a task",
-        data: {}
+        data: []
       });
     });
 };
@@ -343,7 +367,7 @@ exports.findTaskById = (req, res) => {
       if (!doc) {
         res.status(404).json({
           message: `Cannot find the task with id ${taskId}`,
-          data: {}
+          data: []
         });
       } else {
         res.status(200).json({
@@ -355,24 +379,25 @@ exports.findTaskById = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: `Failed to get the task with id ${taskId}`,
-        data: {}
+        data: []
       });
     });
 };
 
+// user's pendingTasks will be upadted when a incompleted task with user assigned is set to completed
 exports.updateTaskById = (req, res) => {
   const task = req.body;
   if (task.name == null || task.name == "") {
     res.status(400).json({
       message: "Task cannot be updated without a name",
-      data: {}
+      data: []
     });
     return;
   }
   if (task.deadline == null || task.deadline == "") {
     res.status(400).json({
       message: "Task cannot be updated without a deadline",
-      data: {}
+      data: []
     });
     return;
   }
@@ -395,7 +420,7 @@ exports.updateTaskById = (req, res) => {
           .catch(err => {
             res.status(500).json({
               message: `Failed to delete the pendingTasks of task with id ${taskId}`,
-              data: {}
+              data: []
             });
           });
       } else {
@@ -408,11 +433,12 @@ exports.updateTaskById = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: `Failed to update the task with id ${taskId}`,
-        data: {}
+        data: []
       });
     });
 };
 
+// user's pendingTasks will be upadted when a incompleted task with user assigned is deleted
 exports.deleteTaskById = (req, res) => {
   const taskId = req.params.id;
   Task.findByIdAndDelete(taskId)
@@ -421,7 +447,7 @@ exports.deleteTaskById = (req, res) => {
       if (!taskDoc) {
         res.status(404).json({
           message: `Cannot find the task with id ${taskId}`,
-          data: {}
+          data: []
         });
       } else {
         if (!taskDoc.completed && taskDoc.assignedUser) {
@@ -438,7 +464,7 @@ exports.deleteTaskById = (req, res) => {
             .catch(err => {
               res.status(500).json({
                 message: `Failed to delete the pendingTasks of task with id ${taskId}`,
-                data: {}
+                data: []
               });
             });
         } else {
@@ -452,7 +478,7 @@ exports.deleteTaskById = (req, res) => {
     .catch(err => {
       res.status(500).json({
         message: `Failed to delete the task with id ${taskId}`,
-        data: {}
+        data: []
       });
     });
 };
